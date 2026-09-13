@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Focus HabboCustomLauncher if its window exists (and pull it on-screen).
+# If the process is alive with no window (close does not quit), restart it.
+# Optional: preload G-Earth's client-access library into the AIR process.
+set -u
+
+GEARTH_ACCESS_LIB="${GEARTH_ACCESS_LIB:-$HOME/.local/lib/gearth-client-access.so}"
+if [[ -f "$GEARTH_ACCESS_LIB" ]]; then
+  export LD_PRELOAD="$GEARTH_ACCESS_LIB${LD_PRELOAD:+:$LD_PRELOAD}"
+fi
+
+BIN="${HABBO_LAUNCHER_BIN:-$HOME/.local/bin/HabboCustomLauncher}"
+CLASS="HabboCustomLauncher_Linux_x64"
+LOCK="$HOME/.config/Habbo Launcher/HabboAirPlus.lock"
+LOG="${XDG_STATE_HOME:-$HOME/.local/state}/HabboCustomLauncher/launcher.log"
+
+mkdir -p "$(dirname "$LOG")"
+log() { printf '%s %s\n' "$(date -Iseconds)" "$*" >>"$LOG"; }
+
+if [[ ! -x "$BIN" ]]; then
+  log "missing binary $BIN"
+  exit 1
+fi
+
+if [[ "${1:-}" == habbo://* ]]; then
+  exec "$BIN" "$@"
+fi
+
+window_address() {
+  hyprctl clients -j 2>/dev/null | jq -r --arg p "$CLASS" --arg t "HabboCustomLauncher" '
+    [.[] | select((.class == $p) or (.initialClass == $p) or (.title == $t)) | .address]
+    | first // empty' 2>/dev/null || true
+}
+
+center_on_focused_monitor() {
+  local pos
+  pos="$(hyprctl monitors -j 2>/dev/null | jq -r '
+    (.[] | select(.focused == true) // .[0]) as $m |
+    "\((($m.x + ($m.width / 2) - 321) | floor)) \((($m.y + ($m.height / 2) - 256) | floor))"
+  ' 2>/dev/null || true)"
+  local x y
+  x="${pos%% *}"
+  y="${pos#* }"
+  [[ -n "$x" && -n "$y" && "$x" != "$pos" ]] || return 0
+  hyprctl dispatch "hl.dsp.window.move({ x = $x, y = $y })" >/dev/null 2>&1 || \
+    hyprctl dispatch movewindowpixel "exact $x $y,class:$CLASS" >/dev/null 2>&1 || true
+}
+
+focus_window() {
+  local addr
+  addr="$(window_address)"
+  [[ -z "$addr" || "$addr" == "null" ]] && return 1
+  hyprctl dispatch "hl.dsp.focus({ window = \"address:$addr\" })" >/dev/null 2>&1 || \
+    hyprctl dispatch focuswindow "address:$addr" >/dev/null 2>&1 || true
+  center_on_focused_monitor
+  hyprctl dispatch "hl.dsp.focus({ window = \"address:$addr\" })" >/dev/null 2>&1 || \
+    hyprctl dispatch focuswindow "address:$addr" >/dev/null 2>&1 || true
+  return 0
+}
+
+if focus_window; then
+  log "focused existing window"
+  exit 0
+fi
+
+if pgrep -f '/\.local/bin/HabboCustomLauncher$' >/dev/null 2>&1 \
+  || pgrep -f '/HabboCustomLauncher_Linux_x64$' >/dev/null 2>&1; then
+  log "process alive without a window; restarting"
+  pkill -f '/\.local/bin/HabboCustomLauncher$' >/dev/null 2>&1 || true
+  pkill -f '/HabboCustomLauncher_Linux_x64$' >/dev/null 2>&1 || true
+  sleep 0.4
+  rm -f "$LOCK" || true
+fi
+
+log "starting $BIN $*"
+exec "$BIN" "$@"

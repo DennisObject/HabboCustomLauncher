@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# HabboCustomLauncher rewrites ~/.local/share/applications/HabboCustomLauncher.desktop
+# on every start using CRLF. Some shells then drop the entry from the app launcher.
+# Keep a stable habbo.desktop for search, and rewrite the app's file as a hidden
+# mime-handler so habbo: URLs still work.
+set -euo pipefail
+
+APPS="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+BIN="${HABBO_LAUNCHER_BIN:-$HOME/.local/bin/HabboCustomLauncher}"
+WRAPPER="${HABBO_LAUNCHER_WRAPPER:-$HOME/.local/bin/habbo-launcher}"
+ICON="habbo"
+WMCLASS="HabboCustomLauncher_Linux_x64"
+
+mkdir -p "$APPS"
+
+write_unix() {
+  local dest=$1
+  local tmp
+  tmp="$(mktemp "$dest.XXXXXX")"
+  printf '%s\n' "$2" | tr -d '\r' >"$tmp"
+  mv -f "$tmp" "$dest"
+  chmod +x "$dest"
+}
+
+needs_restore() {
+  local file=$1
+  [[ ! -f "$file" ]] && return 0
+  grep -q $'\r' "$file" && return 0
+  grep -q '^NoDisplay=true' "$file" || return 0
+  grep -q '^Icon=habbo$' "$file" || return 0
+  grep -q "^StartupWMClass=$WMCLASS$" "$file" || return 0
+  return 1
+}
+
+write_unix "$APPS/habbo.desktop" "[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Habbo Launcher
+GenericName=Habbo client launcher
+Comment=Custom Habbo launcher for Origins, Air, and Nitro
+Exec=$WRAPPER
+Icon=$ICON
+Terminal=false
+Categories=Game;
+Keywords=habbo;hcl;customlauncher;origins;nitro;air;HabboCustomLauncher;
+StartupNotify=true
+StartupWMClass=$WMCLASS
+SingleMainWindow=true"
+
+if needs_restore "$APPS/HabboCustomLauncher.desktop"; then
+  write_unix "$APPS/HabboCustomLauncher.desktop" "[Desktop Entry]
+Type=Application
+Version=1.0
+Name=HabboCustomLauncher
+Exec=$BIN %U
+Icon=$ICON
+Terminal=false
+Categories=Game;
+MimeType=x-scheme-handler/habbo;
+NoDisplay=true
+StartupNotify=true
+StartupWMClass=$WMCLASS"
+fi
+
+update-desktop-database "$APPS" >/dev/null 2>&1 || true
+xdg-mime default HabboCustomLauncher.desktop x-scheme-handler/habbo >/dev/null 2>&1 || true

@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch HabboCustomLauncher.desktop for CRLF rewrites
+
+[Path]
+PathModified=%h/.local/share/applications/HabboCustomLauncher.desktop
+PathChanged=%h/.local/share/applications/HabboCustomLauncher.desktop
+Unit=habbo-desktop-fix.service
+
+[Install]
+WantedBy=default.target

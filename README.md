@@ -7,6 +7,8 @@
 |---------------------|----------------|--------------|--------------|
 | Windows (7+)        | ✅              | ✅            | ✅            |
 | Linux (glibc 2.33+) | ✅              | ✅            | ✅ (partial)  |
+
+Linux desktop wrappers (CRLF `.desktop` rewrite, existing-window focus, optional G-Earth preload) live in [`linux/`](linux/README.md).
 | OSX (10.12+)        | ✅              | ✅            | ❌            |
 
 Looking for the download page? ⬇️

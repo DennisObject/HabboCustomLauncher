@@ -1,0 +1,6 @@
+[Unit]
+Description=Restore HabboCustomLauncher desktop entry after the app overwrites it
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/share/HabboCustomLauncher/install-desktop
