@@ -6,8 +6,8 @@
 | OS                  | Classic client | App shortcut | App protocol |
 |---------------------|----------------|--------------|--------------|
 | Windows (7+)        | ✅              | ✅            | ✅            |
-| Linux (glibc 2.33+) | ✅              | ✅            | ✅ (partial)  |
-| OSX (10.12+)        | ✅              | ✅            | ❌            |
+| Linux (glibc 2.33+) | ✅              | ✅            | ✅            |
+| OSX (10.12+)        | ✅              | ✅            | ✅ (needs write access to /Applications) |
 
 Linux desktop wrappers (CRLF `.desktop` rewrite, existing-window focus, optional G-Earth preload) live in [`linux/`](linux/README.md).
 
@@ -41,8 +41,10 @@ The launcher downloads the official Habbo AIR client itself on first start.
 ### Play on a custom hotel (for example plusemu.dev)
 
 1. Open **Settings** and set **Hotel domain** to the hotel's domain, e.g. `plusemu.dev`.
-2. If the hotel gives you a launcher token, paste it into **Hotel token**. Otherwise open the hotel's "Play in AIR" link while signed in on its website; it hands the launcher a ticket.
-3. Press **Play**. The launcher fetches the hotel's client settings, prepares a copy of the client for that hotel and starts it. Your Habbo client folder is not changed.
+2. Press **Open plusemu.dev**. The hotel's website opens in your browser. Sign in if needed.
+3. Press **Open AIR client** on the website. The browser hands the launcher a ticket through a `habbo://` link, and the launcher fetches the hotel's client settings, prepares a copy of the client for that hotel and starts it. Your Habbo client folder is not changed.
+
+If the hotel gives you a launcher token, paste it into **Hotel token** instead. The main button then starts the client directly.
 
 Clear **Hotel domain** to go back to Habbo and its login codes.
 
@@ -97,4 +99,12 @@ The patch is needed because the AIR client has no argument for an arbitrary serv
 { "ticket": "<sso ticket>" }
 ```
 
-A hotel website can also hand over a ticket from the user's own web session with a link to `habbo://hab?server=<domain>&token=<sso ticket>`. When the launcher is set to that domain, it uses that ticket for the next launch.
+Without a hotel token, the main button opens `https://<domain>/?launcher=air` in the system browser, where the player is already signed in. The website can then hand over a ticket from that session with a link to `habbo://hab?server=<domain>&token=<sso ticket>`. When the launcher is set to that domain, it starts the client with that ticket; links for other domains are ignored. A link copied to the clipboard still works as a fallback.
+
+The launcher registers itself as the `habbo://` handler on every start:
+
+- **Windows:** `HKCU\Software\Classes\habbo`.
+- **Linux:** `~/.local/share/applications/HabboCustomLauncher.desktop` with `MimeType=x-scheme-handler/habbo;`, then `update-desktop-database` and `xdg-mime default HabboCustomLauncher.desktop x-scheme-handler/habbo`.
+- **macOS:** the `/Applications/HabboCustomLauncher.app` shortcut bundle declares the `habbo` scheme and forwards the link to the launcher. The launcher rebuilds it when it is missing or points at another binary, registers it with `lsregister` and sets it as the default handler.
+
+The site opens in the system browser rather than an embedded view: Avalonia has no built-in cross-platform web view, and the browser already holds the player's session.
