@@ -1,7 +1,10 @@
 # Linux desktop and G-Earth helpers
 
-These are optional wrappers for Linux desktops. The shipped binary still
-writes a CRLF `.desktop` file on every start.
+These are optional wrappers for Linux desktops. The launcher itself writes
+`~/.local/share/applications/HabboCustomLauncher.desktop` (LF line endings) and
+sets it as the `x-scheme-handler/habbo` default on every start, so `habbo:`
+links work without them. It keeps an existing handler entry for the same
+binary, such as the hidden one `install-desktop` writes.
 
 ## Desktop entry
 
@@ -15,8 +18,8 @@ systemctl --user enable --now habbo-desktop-fix.path
 ```
 
 `habbo.desktop` stays in the app launcher. `HabboCustomLauncher.desktop` is
-hidden and only handles `habbo:` URLs. The path unit rewrites that file when
-the app overwrites it with CRLF.
+hidden and only handles `habbo:` URLs. Older launcher builds overwrote that
+file with CRLF line endings on every start; the path unit restores it for them.
 
 ## Existing-window focus
 

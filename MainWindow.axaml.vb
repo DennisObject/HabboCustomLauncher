@@ -46,6 +46,7 @@ Partial Public Class MainWindow : Inherits Window
     Public CurrentClientUrls As JsonClientUrls
     Public CurrentHotelConfig As HotelClientConfig
     Public CurrentHotelTicket As String = "" 'From a habbo://hab?server=<hotel domain>&token=<ticket> link
+    Private HotelWebsiteButtonText As String = "" 'Main button text while it opens the hotel website
     Public CurrentDownloadProgress As Integer
     Public CurrentLanguageInt As Integer = 0
     Private HttpClient As New HttpClient()
@@ -141,17 +142,53 @@ Partial Public Class MainWindow : Inherits Window
             CurrentLoginCode = Nothing
             LoginCodeButton.Text = AppTranslator.CustomHotel(CurrentLanguageInt) & ": " & Singleton.GetCurrentInstance().HotelDomain
             LoginCodeButton2.IsVisible = False
+            If LoadingWindowChild Is Nothing Then 'A habbo:// start launches right away and shows its own status
+                HotelWebsiteButtonText = If(UsesHotelWebsite(), AppTranslator.OpenHotelWebsite(CurrentLanguageInt) & " " & Singleton.GetCurrentInstance().HotelDomain, "")
+                StartNewInstanceButton.Text = If(HotelWebsiteButtonText <> "", HotelWebsiteButtonText, AppTranslator.CheckUpdatesAndLaunchClient(CurrentLanguageInt))
+            End If
             StartNewInstanceButton.IsButtonDisabled = False
             StartNewInstanceButton2.IsButtonDisabled = False
             ChangeUpdateSourceButton.IsButtonDisabled = True
             DisplayLauncherVersionOnFooter()
         ElseIf CurrentLoginCode Is Nothing Then
+            If HotelWebsiteButtonText <> "" AndAlso StartNewInstanceButton.Text = HotelWebsiteButtonText Then
+                StartNewInstanceButton.Text = AppTranslator.CheckUpdatesAndLaunchClient(CurrentLanguageInt)
+            End If
+            HotelWebsiteButtonText = ""
             LoginCodeButton.Text = AppTranslator.ClipboardLoginCodeNotDetected(CurrentLanguageInt)
             LoginCodeButton2.IsVisible = False
             StartNewInstanceButton.IsButtonDisabled = True
             StartNewInstanceButton2.IsButtonDisabled = True
             ChangeUpdateSourceButton.IsButtonDisabled = False
         End If
+    End Sub
+
+    ''' <summary>Custom hotels without a hotel token start from the hotel's website, which hands over a ticket with a habbo:// link.</summary>
+    Private Function UsesHotelWebsite() As Boolean
+        Return Singleton.GetCurrentInstance().IsCustomHotel() AndAlso String.IsNullOrWhiteSpace(Singleton.GetCurrentInstance().HotelToken)
+    End Function
+
+    ''' <summary>Opens https://&lt;domain&gt;/?launcher=air in the system browser, where the player's web session already lives.</summary>
+    Private Async Function OpenHotelWebsiteAsync() As Task
+        Dim Url = CustomHotel.GetWebsiteUrl(Singleton.GetCurrentInstance().HotelDomain)
+        Try
+            Dim UriLauncher = TopLevel.GetTopLevel(Me)?.Launcher
+            If UriLauncher IsNot Nothing AndAlso Await UriLauncher.LaunchUriAsync(New Uri(Url)) Then
+                Return
+            End If
+            Process.Start(New ProcessStartInfo(Url) With {.UseShellExecute = True})
+        Catch ex As Exception
+            MsgBox(AppTranslator.ErrorDebugClipboardHint(CurrentLanguageInt), AppTranslator.HotelWebsiteOpenError(CurrentLanguageInt), Url & " " & ex.Message)
+        End Try
+    End Function
+
+    Private Sub StartHotelLaunch()
+        StartNewInstanceButton.IsButtonDisabled = True
+        StartNewInstanceButton2.IsButtonDisabled = True
+        ChangeUpdateSourceButton.IsButtonDisabled = True
+        ChangeUpdateSourceButton2.IsButtonDisabled = True
+        FocusManager.ClearFocus()
+        CheckUpdatesAndLaunchClient()
     End Sub
 
     Public Shared Function GetAssetHash(assetName As String) As String
@@ -291,6 +328,14 @@ Partial Public Class MainWindow : Inherits Window
     End Function
 
     Private Sub StartNewInstanceButton_Click(sender As Object, e As RoutedEventArgs) Handles StartNewInstanceButton.Click
+        If HotelWebsiteButtonText <> "" AndAlso StartNewInstanceButton.Text = HotelWebsiteButtonText Then
+            If CurrentHotelTicket <> "" Then
+                StartHotelLaunch()
+            Else
+                OpenHotelWebsiteAsync()
+            End If
+            Return
+        End If
         If StartNewInstanceButton.Text = AppTranslator.RetryClientUpdatesCheck(CurrentLanguageInt) Then
             StartNewInstanceButton.IsButtonDisabled = True
             StartNewInstanceButton2.IsButtonDisabled = True
@@ -846,6 +891,11 @@ Partial Public Class MainWindow : Inherits Window
                 CurrentHotelTicket = LinkTicket
                 FakeClipboardContent = ""
                 Await EnsureCurrentWindowFocus()
+                'The website's "Open AIR client" link starts the client now. A habbo:// start launches from the loading window instead.
+                If LoadingWindowChild Is Nothing AndAlso Not StartNewInstanceButton.IsButtonDisabled AndAlso
+                    (StartNewInstanceButton.Text = HotelWebsiteButtonText OrElse StartNewInstanceButton.Text = AppTranslator.CheckUpdatesAndLaunchClient(CurrentLanguageInt)) Then
+                    StartHotelLaunch()
+                End If
             End If
             Return False 'No login code for custom hotels
         End If
@@ -1228,12 +1278,12 @@ End Try
                 Return True
             End If
             If RuntimeInformation.IsOSPlatform(OSPlatform.Linux) Or RuntimeInformation.IsOSPlatform(OSPlatform.FreeBSD) Then
-                AddStartMenuShortcut() 'xdg protocol association requires an start menu shortcut
-                Dim processInfo As New ProcessStartInfo("xdg-mime", "default HabboCustomLauncher.desktop x-scheme-handler/habbo") With {
-                    .UseShellExecute = False,
-                    .CreateNoWindow = False
-                }
-                Process.Start(processInfo)?.WaitForExit()
+                CopyLinuxIcons()
+                ProtocolHandler.RegisterLinux(applicationLocation) 'xdg protocol association requires an app menu entry
+                Return True
+            End If
+            If RuntimeInformation.IsOSPlatform(OSPlatform.OSX) Then
+                ProtocolHandler.RegisterMac(applicationLocation, AddressOf AddStartMenuShortcut)
                 Return True
             End If
             Throw New Exception("Could not register protocol")
@@ -1360,6 +1410,13 @@ End Try
         CreateShortcut(Environment.ProcessPath, "HabboCustomLauncher", False)
     End Sub
 
+    Private Sub CopyLinuxIcons()
+        For Each IconsPath In {Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".icons"), Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share", "icons")}
+            Directory.CreateDirectory(IconsPath)
+            CopyEmbeddedAsset("HabboCustomLauncherIcon.png", IconsPath)
+        Next
+    End Sub
+
     Sub ToggleAutomaticHabboProtocol()
         'TODO
     End Sub
@@ -1406,24 +1463,12 @@ End Try
             If String.IsNullOrWhiteSpace(ShortcutPath) Then
                 ShortcutPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Desktop")
             End If
-            Dim IconsPath As String = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".icons")
-            Dim IconsPath2 As String = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share", "icons")
             If isDesktop = False Then
                 ShortcutPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share", "applications")
             End If
-            Dim shortcutContent As String =
-                $"[Desktop Entry]
-                Type=Application
-                Name={appName}
-                Exec=""{appPath}"" %U
-                Terminal=false
-                Icon=HabboCustomLauncherIcon.png
-                Categories=Game;
-                MimeType=x-scheme-handler/habbo;".Replace("                ", "")
-            Directory.CreateDirectory(IconsPath)
+            Dim shortcutContent As String = ProtocolHandler.BuildLinuxDesktopEntry(appPath, appName)
             Directory.CreateDirectory(ShortcutPath)
-            CopyEmbeddedAsset("HabboCustomLauncherIcon.png", IconsPath)
-            CopyEmbeddedAsset("HabboCustomLauncherIcon.png", IconsPath2)
+            CopyLinuxIcons()
             File.WriteAllText(Path.Combine(ShortcutPath, appName & ".desktop"), shortcutContent)
             MakeUnixExecutable(Path.Combine(ShortcutPath, appName & ".desktop"))
         End If
@@ -1756,6 +1801,14 @@ Public Class AppTranslator
     Public Shared CustomHotel As String() = {
         "Hotel",
         "Hotel"
+    }
+    Public Shared OpenHotelWebsite As String() = {
+        "Open",
+        "Abrir"
+    }
+    Public Shared HotelWebsiteOpenError As String() = {
+        "Could not open the hotel website",
+        "No se pudo abrir la web del hotel"
     }
     Public Shared PatchingClient As String() = {
         "Preparing hotel client ...",

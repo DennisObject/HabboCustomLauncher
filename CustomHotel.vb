@@ -12,6 +12,7 @@ Imports System.Text.RegularExpressions
 ''' </summary>
 Public Module CustomHotel
     Public Const ConfigPath As String = "/api/client/air.json"
+    Public Const WebsitePath As String = "/?launcher=air"
     Public Const DefaultEnvironment As String = "en"
     Public Const DefaultClientUrlsUrl As String = "https://www.habbo.com/gamedata/clienturls"
 
@@ -60,6 +61,11 @@ Public Module CustomHotel
 
     Public Function GetConfigUrl(Domain As String) As String
         Return "https://" & NormalizeDomain(Domain) & ConfigPath
+    End Function
+
+    ''' <summary>The hotel's website, marked so it can offer an "Open AIR client" link that hands this launcher a ticket.</summary>
+    Public Function GetWebsiteUrl(Domain As String) As String
+        Return "https://" & NormalizeDomain(Domain) & WebsitePath
     End Function
 
     ''' <summary>Arguments for the AIR client. HabboAir.parseArguments reads "-server" and "-ticket" pairs.</summary>
