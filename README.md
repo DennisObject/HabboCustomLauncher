@@ -7,13 +7,44 @@
 |---------------------|----------------|--------------|--------------|
 | Windows (7+)        | ✅              | ✅            | ✅            |
 | Linux (glibc 2.33+) | ✅              | ✅            | ✅ (partial)  |
-
-Linux desktop wrappers (CRLF `.desktop` rewrite, existing-window focus, optional G-Earth preload) live in [`linux/`](linux/README.md).
 | OSX (10.12+)        | ✅              | ✅            | ❌            |
 
-Looking for the download page? ⬇️
+Linux desktop wrappers (CRLF `.desktop` rewrite, existing-window focus, optional G-Earth preload) live in [`linux/`](linux/README.md).
 
-https://github.com/LilithRainbows/HabboCustomLauncher/releases/latest
+## Install
+
+Download the build for your system from this fork's releases (they include the custom hotel domain setting):
+
+https://github.com/DennisObject/HabboCustomLauncher/releases/latest
+
+| System | File |
+|---|---|
+| Windows | `HabboCustomLauncher.exe` |
+| macOS (Apple Silicon) | `HabboCustomLauncher_OSX_arm64` |
+| macOS (Intel) | `HabboCustomLauncher_OSX_x64` |
+| Linux x64 / ARM64 | `HabboCustomLauncher_Linux_x64` / `HabboCustomLauncher_Linux_arm64` |
+
+- **Windows:** run `HabboCustomLauncher.exe`. If SmartScreen warns about an unknown publisher, choose *More info* → *Run anyway*.
+- **macOS:** the build is not signed. In Terminal, in the folder you downloaded it to:
+
+  ```sh
+  chmod +x HabboCustomLauncher_OSX_arm64
+  xattr -d com.apple.quarantine HabboCustomLauncher_OSX_arm64
+  ./HabboCustomLauncher_OSX_arm64
+  ```
+
+  (use `_OSX_x64` on an Intel Mac).
+- **Linux:** `chmod +x HabboCustomLauncher_Linux_x64 && ./HabboCustomLauncher_Linux_x64`.
+
+The launcher downloads the official Habbo AIR client itself on first start.
+
+### Play on a custom hotel (for example plusemu.dev)
+
+1. Open **Settings** and set **Hotel domain** to the hotel's domain, e.g. `plusemu.dev`.
+2. If the hotel gives you a launcher token, paste it into **Hotel token**. Otherwise open the hotel's "Play in AIR" link while signed in on its website; it hands the launcher a ticket.
+3. Press **Play**. The launcher fetches the hotel's client settings, prepares a copy of the client for that hotel and starts it. Your Habbo client folder is not changed.
+
+Clear **Hotel domain** to go back to Habbo and its login codes.
 
 ## Custom hotel domain
 
