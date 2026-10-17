@@ -44,6 +44,8 @@ Partial Public Class MainWindow : Inherits Window
     Public FakeClipboardContent As String
     Public CurrentLoginCode As LoginCode
     Public CurrentClientUrls As JsonClientUrls
+    Public CurrentHotelConfig As HotelClientConfig
+    Public CurrentHotelTicket As String = "" 'From a habbo://hab?server=<hotel domain>&token=<ticket> link
     Public CurrentDownloadProgress As Integer
     Public CurrentLanguageInt As Integer = 0
     Private HttpClient As New HttpClient()
@@ -128,7 +130,28 @@ Partial Public Class MainWindow : Inherits Window
             LoadingWindowClientLaunchRequested = True
         End If
 
+        RefreshHotelMode()
         StartFullyLoadWaiter()
+    End Sub
+
+    ''' <summary>Custom hotel domains skip the login code: the launch button is always available.</summary>
+    Public Sub RefreshHotelMode()
+        RefreshUpdateSourceText()
+        If Singleton.GetCurrentInstance().IsCustomHotel() Then
+            CurrentLoginCode = Nothing
+            LoginCodeButton.Text = AppTranslator.CustomHotel(CurrentLanguageInt) & ": " & Singleton.GetCurrentInstance().HotelDomain
+            LoginCodeButton2.IsVisible = False
+            StartNewInstanceButton.IsButtonDisabled = False
+            StartNewInstanceButton2.IsButtonDisabled = False
+            ChangeUpdateSourceButton.IsButtonDisabled = True
+            DisplayLauncherVersionOnFooter()
+        ElseIf CurrentLoginCode Is Nothing Then
+            LoginCodeButton.Text = AppTranslator.ClipboardLoginCodeNotDetected(CurrentLanguageInt)
+            LoginCodeButton2.IsVisible = False
+            StartNewInstanceButton.IsButtonDisabled = True
+            StartNewInstanceButton2.IsButtonDisabled = True
+            ChangeUpdateSourceButton.IsButtonDisabled = False
+        End If
     End Sub
 
     Public Shared Function GetAssetHash(assetName As String) As String
@@ -330,12 +353,30 @@ Partial Public Class MainWindow : Inherits Window
             Else 'Linux
                 ClientProcess.StartInfo.FileName = Path.Combine(GetPossibleClientPath(CurrentClientUrls.FlashWindowsVersion), "Habbo")
             End If
-            ClientProcess.StartInfo.Arguments = "-server " & CurrentLoginCode.ServerId & " -ticket " & CurrentLoginCode.SSOTicket
-            Await Task.Run(Sub() ClientProcess.Start())
-            Await Task.Delay(1000)
+            If Singleton.GetCurrentInstance().IsCustomHotel() Then
+                StartNewInstanceButton.Text = AppTranslator.PatchingClient(CurrentLanguageInt)
+                Dim HotelConfig = CurrentHotelConfig
+                Dim SwfPath = Path.Combine(ClientFolderPath, "HabboAir.swf")
+                Await Task.Run(Sub() PatchHotelClient(SwfPath, HotelConfig))
+                Dim Ticket = CurrentHotelTicket
+                If Ticket = "" Then
+                    Ticket = Await CustomHotel.FetchTicketAsync(HotelConfig, Singleton.GetCurrentInstance().HotelToken, LauncherUserAgent)
+                End If
+                CurrentHotelTicket = ""
+                StartNewInstanceButton.Text = AppTranslator.LaunchingClient(CurrentLanguageInt)
+                For Each Argument In CustomHotel.BuildLaunchArguments(HotelConfig.Environment, Ticket)
+                    ClientProcess.StartInfo.ArgumentList.Add(Argument)
+                Next
+                Await Task.Run(Sub() ClientProcess.Start())
+                Await Task.Delay(1000)
+            Else
+                ClientProcess.StartInfo.Arguments = "-server " & CurrentLoginCode.ServerId & " -ticket " & CurrentLoginCode.SSOTicket
+                Await Task.Run(Sub() ClientProcess.Start())
+                Await Task.Delay(1000)
 
-            If CurrentLoginCode.IsFromFakeClipboard = False Then
-                Await CleanRealClipboardLoginCode(False)
+                If CurrentLoginCode.IsFromFakeClipboard = False Then
+                    Await CleanRealClipboardLoginCode(False)
+                End If
             End If
 
             CurrentLoginCode = Nothing
@@ -346,15 +387,32 @@ Partial Public Class MainWindow : Inherits Window
             ChangeUpdateSourceButton.IsButtonDisabled = False
             ChangeUpdateSourceButton2.IsButtonDisabled = False
             StartNewInstanceButton.Text = AppTranslator.CheckUpdatesAndLaunchClient(CurrentLanguageInt)
+            RefreshHotelMode()
         Catch ex As Exception
             StartNewInstanceButton.IsButtonDisabled = False
             StartNewInstanceButton2.IsButtonDisabled = False
             ChangeUpdateSourceButton.IsButtonDisabled = False
             ChangeUpdateSourceButton2.IsButtonDisabled = False
             StartNewInstanceButton.Text = AppTranslator.CheckUpdatesAndLaunchClient(CurrentLanguageInt)
+            RefreshHotelMode()
             MsgBox(AppTranslator.ErrorDebugClipboardHint(CurrentLanguageInt), AppTranslator.ClientLaunchError(CurrentLanguageInt), ex.Message)
         End Try
     End Function
+
+    ''' <summary>Writes HabboAir.swf from the untouched copy (HabboAir.habbo.swf) with the hotel's endpoints and RSA key.</summary>
+    Public Sub PatchHotelClient(SwfPath As String, HotelConfig As HotelClientConfig)
+        Dim PristineSwfPath = Path.Combine(Path.GetDirectoryName(SwfPath), "HabboAir.habbo.swf")
+        Dim FingerprintPath = Path.Combine(Path.GetDirectoryName(SwfPath), "HOTEL_PATCH.txt")
+        If Not File.Exists(PristineSwfPath) Then
+            File.Copy(SwfPath, PristineSwfPath)
+        End If
+        Dim Fingerprint = HotelConfig.GetPatchFingerprint()
+        If File.Exists(FingerprintPath) AndAlso File.ReadAllText(FingerprintPath) = Fingerprint Then
+            Return 'Already patched for this hotel config
+        End If
+        HotelSwfPatcher.PatchFile(PristineSwfPath, SwfPath, HotelConfig)
+        File.WriteAllText(FingerprintPath, Fingerprint)
+    End Sub
 
     Public Async Function CleanRealClipboardLoginCode(CleanCurrentLoginCode As Boolean) As Task(Of Boolean)
         Dim Ok As Boolean = False
@@ -487,7 +545,7 @@ Partial Public Class MainWindow : Inherits Window
         Try
             Dim ClientFolderPath = GetPossibleClientPath(CurrentClientUrls.FlashWindowsVersion)
             Dim ClientFilePath = Path.Combine(ClientFolderPath, "ClientDownload.zip")
-            If Singleton.GetCurrentInstance().UpdateSource = "AIR_Plus" Then
+            If Singleton.GetCurrentInstance().GetEffectiveUpdateSource() = "AIR_Plus" Then
                 ClientFilePath = Path.Combine(ClientFolderPath, "HabboAir.swf")
             End If
             Dim DownloadingClientHint = AppTranslator.DownloadingClient(CurrentLanguageInt)
@@ -512,7 +570,7 @@ Partial Public Class MainWindow : Inherits Window
             File.Delete(Path.Combine(ClientFolderPath, GetAirPatchNameForCurrentOS))
 
 
-            If Singleton.GetCurrentInstance().UpdateSource = "AIR_Plus" Then
+            If Singleton.GetCurrentInstance().GetEffectiveUpdateSource() = "AIR_Plus" Then
                 Await Task.Run(Sub() CopyEmbeddedAsset(AirPlusPatchName, ClientFolderPath))
                 Await Task.Run(Sub() UnzipFile(Path.Combine(ClientFolderPath, AirPlusPatchName), ClientFolderPath, True))
                 File.Delete(Path.Combine(ClientFolderPath, AirPlusPatchName))
@@ -581,7 +639,7 @@ Partial Public Class MainWindow : Inherits Window
                 MakeUnixExecutable(Path.Combine(ClientFolderPath, "Habbo")) 'Linux
             End If
 
-            If Singleton.GetCurrentInstance().UpdateSource = "AIR_Plus" Then
+            If Singleton.GetCurrentInstance().GetEffectiveUpdateSource() = "AIR_Plus" Then
                 Dim AirPlusClientLatestVersion = Await GetRemoteLastModifiedHeaderEpoch(AirPlusClientURL)
                 If CurrentClientUrls.FlashWindowsVersion = AirPlusClientLatestVersion = False Then
                     Throw New Exception("AirPlus remote client version mismatch") 'Es muy poco probable pero este error ocurre si el identificador de la version remota de airplus cambio desde que se inicio el proceso de descarga
@@ -590,7 +648,7 @@ Partial Public Class MainWindow : Inherits Window
 
             File.WriteAllText(Path.Combine(ClientFolderPath, "AIR_HASH.txt"), GetAssetHash(GetAirPatchNameForCurrentOS))
             File.WriteAllText(Path.Combine(ClientFolderPath, "VERSION.txt"), CurrentClientUrls.FlashWindowsVersion)
-            If Singleton.GetCurrentInstance().UpdateSource = "AIR_Plus" = False Then
+            If Singleton.GetCurrentInstance().GetEffectiveUpdateSource() = "AIR_Plus" = False AndAlso Singleton.GetCurrentInstance().IsCustomHotel() = False Then
                 AddOrUpdateInstallation(CurrentClientUrls.FlashWindowsVersion, ClientFolderPath, "air", 0)
             End If
 
@@ -782,6 +840,15 @@ Partial Public Class MainWindow : Inherits Window
     End Function
 
     Private Async Function CheckClipboardLoginCodeAsync() As Task(Of Boolean)
+        If Singleton.GetCurrentInstance().IsCustomHotel() Then
+            Dim LinkTicket = CustomHotel.GetTicketFromProtocolLink(FakeClipboardContent, Singleton.GetCurrentInstance().HotelDomain)
+            If LinkTicket <> "" Then
+                CurrentHotelTicket = LinkTicket
+                FakeClipboardContent = ""
+                Await EnsureCurrentWindowFocus()
+            End If
+            Return False 'No login code for custom hotels
+        End If
         Try
             'Console.WriteLine("Trying to read real clipboard")
             Dim ClipboardText = Await GetClipboardText()
@@ -915,14 +982,25 @@ End Try
         Try
             Dim IsClientUpdated As Boolean = False
             StartNewInstanceButton.Text = AppTranslator.ClientUpdatesCheck(CurrentLanguageInt)
-            If Singleton.GetCurrentInstance().UpdateSource = "AIR_Official" Then
+            If Singleton.GetCurrentInstance().IsCustomHotel() Then
+                CurrentHotelConfig = Await CustomHotel.FetchConfigAsync(Singleton.GetCurrentInstance().HotelDomain, LauncherUserAgent)
+                If CurrentHotelConfig.ClientUrl <> "" Then
+                    CurrentClientUrls = New JsonClientUrls(CurrentHotelConfig.ClientVersion, CurrentHotelConfig.ClientUrl)
+                Else
+                    Try
+                        CurrentClientUrls = New JsonClientUrls(Await GetRemoteJsonAsync(CustomHotel.DefaultClientUrlsUrl))
+                    Catch
+                        CurrentClientUrls = New JsonClientUrls(GetLatestLocalClientVersion(), "")
+                    End Try
+                End If
+            ElseIf Singleton.GetCurrentInstance().GetEffectiveUpdateSource() = "AIR_Official" Then
                 Try
                     CurrentClientUrls = New JsonClientUrls(Await GetRemoteJsonAsync("https://" & CurrentLoginCode.ServerUrl & "/gamedata/clienturls"))
                 Catch
                     CurrentClientUrls = New JsonClientUrls(("{'flash-windows-version':'" & GetLatestLocalClientVersion() & "','flash-windows':'" & AirPlusClientURL & "'}").Replace("'", Chr(34)))
                 End Try
             End If
-            If Singleton.GetCurrentInstance().UpdateSource = "AIR_Plus" Then
+            If Singleton.GetCurrentInstance().GetEffectiveUpdateSource() = "AIR_Plus" Then
                 Dim AirPlusClientLatestVersion As String
                 Try
                     AirPlusClientLatestVersion = Await GetRemoteLastModifiedHeaderEpoch(AirPlusClientURL)
@@ -986,7 +1064,10 @@ End Try
 
     Public Function GetPossibleClientPath(ClientVersion As String) As String
         Dim ClientType = "air"
-        If Singleton.GetCurrentInstance().UpdateSource = "AIR_Plus" Then
+        If Singleton.GetCurrentInstance().IsCustomHotel() Then
+            Return Path.Combine(GetAppDataPath, "Habbo Launcher", "downloads", "hotels", CustomHotel.GetDomainFolderName(Singleton.GetCurrentInstance().HotelDomain), ClientVersion)
+        End If
+        If Singleton.GetCurrentInstance().GetEffectiveUpdateSource() = "AIR_Plus" Then
             ClientType = "airplus"
         End If
         Return Path.Combine(GetAppDataPath, "Habbo Launcher", "downloads", ClientType, ClientVersion)
@@ -1056,7 +1137,11 @@ End Try
 
     Private Sub RefreshUpdateSourceText()
         Dim CurrentUpdateSourceLabel = AppTranslator.CurrentUpdateSource(CurrentLanguageInt)
-        Select Case Singleton.GetCurrentInstance().UpdateSource
+        If Singleton.GetCurrentInstance().IsCustomHotel() Then
+            ChangeUpdateSourceButton.Text = CurrentUpdateSourceLabel & ": AIR Classic (" & Singleton.GetCurrentInstance().HotelDomain & ")"
+            Return
+        End If
+        Select Case Singleton.GetCurrentInstance().GetEffectiveUpdateSource()
             Case "AIR_Official"
                 ChangeUpdateSourceButton.Text = CurrentUpdateSourceLabel & ": AIR Classic"
             Case "AIR_Plus"
@@ -1067,7 +1152,7 @@ End Try
     End Sub
 
     Public Function GetCurrentUpdateSourceName()
-        Select Case Singleton.GetCurrentInstance().UpdateSource
+        Select Case Singleton.GetCurrentInstance().GetEffectiveUpdateSource()
             Case "AIR_Official"
                 Return "AIR Classic"
             Case "AIR_Plus"
@@ -1078,6 +1163,9 @@ End Try
     End Function
 
     Private Sub ChangeUpdateSourceButton_Click(sender As Object, e As EventArgs) Handles ChangeUpdateSourceButton.Click
+        If Singleton.GetCurrentInstance().IsCustomHotel() Then
+            Return 'Custom hotels always patch the official client
+        End If
         Select Case Singleton.GetCurrentInstance().UpdateSource
             Case "AIR_Official"
                 Singleton.GetCurrentInstance().UpdateSource = "AIR_Plus"
@@ -1096,7 +1184,7 @@ End Try
             For Each ClientVersionFolder In Directory.GetDirectories(ClientsDirectory)
                 Try
                     Directory.Delete(ClientVersionFolder, True)
-                    If Singleton.GetCurrentInstance().UpdateSource = "AIR_Plus" = False Then
+                    If Singleton.GetCurrentInstance().GetEffectiveUpdateSource() = "AIR_Plus" = False Then
                         RemoveInstallation(New DirectoryInfo(ClientVersionFolder).Name, "air")
                     End If
                 Catch ex As Exception
@@ -1343,7 +1431,7 @@ End Try
 
     Private Sub ChangeUpdateSourceButton2_Click(sender As Object, e As EventArgs) Handles ChangeUpdateSourceButton2.Click
         Dim ClientHint As String = AppTranslator.ClassicAirClientHint(CurrentLanguageInt)
-        If Singleton.GetCurrentInstance().UpdateSource = "AIR_Plus" Then
+        If Singleton.GetCurrentInstance().GetEffectiveUpdateSource() = "AIR_Plus" Then
             ClientHint = AppTranslator.AirPlusClientHint(CurrentLanguageInt)
         End If
         MsgBox(AppTranslator.GenericInfo(CurrentLanguageInt), ClientHint)
@@ -1571,6 +1659,11 @@ Public Class JsonClientUrls
         FlashWindowsVersion = JsonRoot.GetProperty("flash-windows-version").GetString()
         FlashWindowsUrl = JsonRoot.GetProperty("flash-windows").GetString()
     End Sub
+
+    Public Sub New(Version As String, Url As String)
+        FlashWindowsVersion = Version
+        FlashWindowsUrl = Url
+    End Sub
 End Class
 
 Public Class LoginCode
@@ -1660,6 +1753,14 @@ End Class
 
 Public Class AppTranslator
     '0=English 1=Spanish
+    Public Shared CustomHotel As String() = {
+        "Hotel",
+        "Hotel"
+    }
+    Public Shared PatchingClient As String() = {
+        "Preparing hotel client ...",
+        "Preparando cliente del hotel ..."
+    }
     Public Shared GenericInfo As String() = {
         "Information",
         "Informacion"

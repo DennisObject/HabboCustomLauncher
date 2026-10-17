@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:HabboCustomLauncher"
         x:Name="Window"
-        mc:Ignorable="d" Width="500" Height="260" CanResize="False" SystemDecorations="BorderOnly" Opacity="1"
+        mc:Ignorable="d" Width="500" Height="330" CanResize="False" SystemDecorations="BorderOnly" Opacity="1"
         Title="HabboCustomLauncher"
         WindowStartupLocation="CenterScreen" Background="Black" FontFamily="{StaticResource NewSegoeUI}" Icon="/Assets/HabboCustomLauncherIcon.ico" ShowInTaskbar="False">
 	<Grid>
@@ -39,7 +39,13 @@
 								<local:CustomButton x:Name="ClientRenderHelpButton" Grid.Column="4" Icon="{StaticResource QuestionIconGeometry}" ButtonPadding="7"/>
 							</Grid>
 							<Border BorderThickness="1,0,1,1" BorderBrush="#A22A60" Opacity="0.4" Margin="0,5,0,5"/>
-							<Label Content="More settings coming soon!" FontSize="25" HorizontalAlignment="Center"/>
+							<Label Content="Hotel domain:"/>
+							<Grid ColumnDefinitions="*,Auto" Margin="5">
+								<TextBox x:Name="HotelDomainTextBox" Grid.Column="0" Watermark="habbo.com" Margin="0,0,10,0" Foreground="White" Background="#5DBC00A3" FontSize="14"/>
+								<local:CustomButton x:Name="HotelDomainHelpButton" Grid.Column="1" Icon="{StaticResource QuestionIconGeometry}" ButtonPadding="7"/>
+							</Grid>
+							<Label Content="Hotel token (optional):"/>
+							<TextBox x:Name="HotelTokenTextBox" PasswordChar="*" Margin="5" Foreground="White" Background="#5DBC00A3" FontSize="14"/>
 						</StackPanel>
 					</ScrollViewer>
 					<local:CustomButton x:Name="OkButton" Grid.Row="1" Text="OK" Margin="10,5,10,10" ButtonPadding="7,4,7,5"/>
