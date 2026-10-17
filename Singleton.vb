@@ -25,6 +25,19 @@ Public Class Singleton
     Public ClientAirVersion As String = "latest" '(can be old for osx)
     Public ClientRenderMode As String = "cpu" '(gpu for osx)
     Public ClientResolution As String = "standard"
+    Public HotelDomain As String = "" '(empty or a habbo.* domain = Habbo login code flow)
+    Public HotelToken As String = "" '(optional Bearer token for the custom hotel's ticket endpoint)
+
+    Public Function IsCustomHotel() As Boolean
+        Return CustomHotel.IsCustomHotelDomain(HotelDomain)
+    End Function
+
+    Public Function GetEffectiveUpdateSource() As String
+        If IsCustomHotel() Then
+            Return "AIR_Official" 'Custom hotels patch the official client
+        End If
+        Return UpdateSource
+    End Function
 
     Public Function GetWindowsDpiScale() As Double
         Dim hdc As IntPtr = GetDC(IntPtr.Zero)
@@ -102,6 +115,12 @@ Public Class Singleton
                 If SettingName = "ClientResolution" Then
                     ClientResolution = Convert.ToString(SettingValue)
                 End If
+                If SettingName = "HotelDomain" Then
+                    HotelDomain = CustomHotel.NormalizeDomain(Convert.ToString(SettingValue))
+                End If
+                If SettingName = "HotelToken" Then
+                    HotelToken = Convert.ToString(SettingValue)
+                End If
             Next
         End If
         XmlDocument = Nothing
@@ -114,6 +133,8 @@ Public Class Singleton
         GlobalSettings.Add("ClientAirVersion", ClientAirVersion)
         GlobalSettings.Add("ClientRenderMode", ClientRenderMode)
         GlobalSettings.Add("ClientResolution", ClientResolution)
+        GlobalSettings.Add("HotelDomain", HotelDomain)
+        GlobalSettings.Add("HotelToken", HotelToken)
         Using XmlWriter As New XmlTextWriter(Path.Combine(GetLauncherDownloadFolder, "GlobalSettings.xml"), Text.Encoding.UTF8)
             With XmlWriter
                 .WriteStartDocument()

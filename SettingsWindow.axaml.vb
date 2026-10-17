@@ -18,6 +18,9 @@ Partial Public Class SettingsWindow : Inherits Window
     Private WithEvents ClientResolutionButton As CustomButton
     Private WithEvents ClientRenderResetButton As CustomButton
     Private WithEvents ClientRenderHelpButton As CustomButton
+    Private WithEvents HotelDomainTextBox As TextBox
+    Private WithEvents HotelDomainHelpButton As CustomButton
+    Private WithEvents HotelTokenTextBox As TextBox
     Public CurrentLanguageInt As Integer = 0
     Public CopyMessageToClipboardBusy As Boolean = False
     Public ClipboardDebugContent As String = ""
@@ -49,6 +52,9 @@ Partial Public Class SettingsWindow : Inherits Window
         ClientResolutionButton = FindNameScope().Find("ClientResolutionButton")
         ClientRenderResetButton = FindNameScope().Find("ClientRenderResetButton")
         ClientRenderHelpButton = FindNameScope().Find("ClientRenderHelpButton")
+        HotelDomainTextBox = FindNameScope().Find("HotelDomainTextBox")
+        HotelDomainHelpButton = FindNameScope().Find("HotelDomainHelpButton")
+        HotelTokenTextBox = FindNameScope().Find("HotelTokenTextBox")
         Singleton.GetCurrentInstance().ScaleMainGrid(Window)
         ShowSavedSettings()
     End Sub
@@ -72,8 +78,11 @@ Partial Public Class SettingsWindow : Inherits Window
         With ClientResolutionButton
             Singleton.GetCurrentInstance().ClientResolution = .Text.ToLower.Remove(0, .Text.LastIndexOf(" ") + 1)
         End With
+        Singleton.GetCurrentInstance().HotelDomain = CustomHotel.NormalizeDomain(HotelDomainTextBox.Text)
+        Singleton.GetCurrentInstance().HotelToken = If(HotelTokenTextBox.Text, "").Trim()
         Singleton.GetCurrentInstance().SaveGlobalSettingsXML()
         Singleton.GetCurrentInstance().ScaleMainGrid(Singleton.GetCurrentInstance().MainWindow)
+        Singleton.GetCurrentInstance().MainWindow?.RefreshHotelMode()
         Window.Close()
     End Sub
 
@@ -122,6 +131,10 @@ Partial Public Class SettingsWindow : Inherits Window
         End If
     End Sub
 
+    Private Sub HotelDomainHelpButton_Click(sender As Object, e As EventArgs) Handles HotelDomainHelpButton.Click
+        MsgBox("Information", "Leave empty (or a habbo.* domain) to use Habbo with login codes." & vbNewLine & "Any other domain skips the login code and launches that hotel directly, using https://<domain>" & CustomHotel.ConfigPath & "." & vbNewLine & "The hotel token is only needed if the hotel's ticket endpoint asks for one.")
+    End Sub
+
     Private Sub ClientRenderModeButton_Click(sender As Object, e As EventArgs) Handles ClientRenderModeButton.Click
         With ClientRenderModeButton
             Select Case .Text.ToLower.Remove(0, .Text.LastIndexOf(" ") + 1)
@@ -138,6 +151,8 @@ Partial Public Class SettingsWindow : Inherits Window
     Private Sub ShowSavedSettings()
         With Singleton.GetCurrentInstance()
             LauncherScalingUpDown.Value = .CustomWindowScale * 100
+            HotelDomainTextBox.Text = .HotelDomain
+            HotelTokenTextBox.Text = .HotelToken
             Select Case .ClientAirVersion
                 Case "latest"
                     ClientAirVersionButton.Text = "AIR: 51"
