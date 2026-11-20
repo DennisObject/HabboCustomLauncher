@@ -260,6 +260,8 @@ Public Class HotelClientConfig
     ''' <summary>Stable fingerprint of everything that ends up in the patched SWF.</summary>
     Public Function GetPatchFingerprint() As String
         Dim Builder As New StringBuilder()
+        'Bump when the patcher output changes, so clients patched by an older launcher get patched again.
+        Builder.Append("patcher=2").Append(ChrW(10))
         For Each Item In GetConfigurationOverrides().OrderBy(Function(x) x.Key, StringComparer.Ordinal)
             Builder.Append(Item.Key).Append("="c).Append(Item.Value).Append(ChrW(10))
         Next
@@ -347,6 +349,8 @@ Public Module HotelSwfPatcher
 
     ''' <summary>Replaces "key=value" lines in the embedded configuration, or inserts them before "configuration.readonly" so they stay writable.</summary>
     Public Function PatchConfigurationText(Text As String, ConfigValues As Dictionary(Of String, String)) As String
+        'The client splits its configuration on the original line ending, so the patched text must keep it.
+        Dim LineEnding = If(Text.Contains(vbCrLf), vbCrLf, vbLf)
         Dim Lines = Text.Replace(vbCrLf, vbLf).Split(ChrW(10)).ToList()
         Dim Pending As New Dictionary(Of String, String)(ConfigValues)
         For Index = 0 To Lines.Count - 1
@@ -366,7 +370,7 @@ Public Module HotelSwfPatcher
             If InsertAt < 0 Then InsertAt = Lines.Count
             Lines.InsertRange(InsertAt, Pending.Select(Function(x) x.Key & "=" & x.Value))
         End If
-        Return String.Join(vbLf, Lines)
+        Return String.Join(LineEnding, Lines)
     End Function
 
     ''' <summary>
