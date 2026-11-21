@@ -261,7 +261,7 @@ Public Class HotelClientConfig
     Public Function GetPatchFingerprint() As String
         Dim Builder As New StringBuilder()
         'Bump when the patcher output changes, so clients patched by an older launcher get patched again.
-        Builder.Append("patcher=3").Append(ChrW(10))
+        Builder.Append("patcher=4").Append(ChrW(10))
         For Each Item In GetConfigurationOverrides().OrderBy(Function(x) x.Key, StringComparer.Ordinal)
             Builder.Append(Item.Key).Append("="c).Append(Item.Value).Append(ChrW(10))
         Next
@@ -416,6 +416,8 @@ Public Module HotelSwfPatcher
     ''' suffix when it opens the game socket, so it only connects to Habbo servers. The suffix is built from pushint arrays
     ''' decoded by getKeyValue (char = 65290 - value + shift, shift counting down) and appended with "add".
     ''' This turns that "add" into "pop" (both one byte) and returns the suffix, or "" when the client has no such check.
+    ''' A client that already has "pop" there (patched before, or downloaded pre-patched) still returns the suffix,
+    ''' because the client still cuts it off the host.
     ''' </summary>
     Private Function RemoveForcedHostSuffix(Tags As List(Of SwfTag)) As String
         Const DoAbcTag As Integer = 82
@@ -436,7 +438,7 @@ Public Module HotelSwfPatcher
         Return ""
     End Function
 
-    ''' <summary>Reads "(pushint+ newarray n)+ newarray g, pushbyte s, callproperty x 2, add" and decodes the pushed values.</summary>
+    ''' <summary>Reads "(pushint+ newarray n)+ newarray g, pushbyte s, callproperty x 2, add (or pop)" and decodes the pushed values.</summary>
     Private Function TryDecodeSuffixAppend(Data As Byte(), Start As Integer, Pool As List(Of Integer), ByRef AddOffset As Integer) As String
         Try
             Dim Offset = Start
@@ -458,7 +460,7 @@ Public Module HotelSwfPatcher
             Offset += 2
             If Data(Offset) <> &H46 Then Return ""
             ReadU30(Data, Offset + 1, Offset)
-            If ReadU30(Data, Offset, Offset) <> 2 OrElse Data(Offset) <> &HA0 Then Return ""
+            If ReadU30(Data, Offset, Offset) <> 2 OrElse (Data(Offset) <> &HA0 AndAlso Data(Offset) <> &H29) Then Return ""
             Dim Text As New StringBuilder()
             For Each Group In Groups
                 For Each Value In Group
