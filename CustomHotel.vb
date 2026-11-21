@@ -261,7 +261,7 @@ Public Class HotelClientConfig
     Public Function GetPatchFingerprint() As String
         Dim Builder As New StringBuilder()
         'Bump when the patcher output changes, so clients patched by an older launcher get patched again.
-        Builder.Append("patcher=2").Append(ChrW(10))
+        Builder.Append("patcher=4").Append(ChrW(10))
         For Each Item In GetConfigurationOverrides().OrderBy(Function(x) x.Key, StringComparer.Ordinal)
             Builder.Append(Item.Key).Append("="c).Append(Item.Value).Append(ChrW(10))
         Next
@@ -309,11 +309,19 @@ Public Module HotelSwfPatcher
         Dim HeaderLength = GetHeaderLength(Body)
         Dim Tags = ReadTags(Body, HeaderLength)
 
+        Dim ConfigValues = Config.GetConfigurationOverrides()
+        Dim ForcedSuffix = RemoveForcedHostSuffix(Tags)
+        If ForcedSuffix <> "" Then
+            'The client still cuts the suffix length off the host, so give it a suffix to cut.
+            Dim HostKey = "connection.info.host." & Config.Environment
+            ConfigValues(HostKey) = ConfigValues(HostKey) & ForcedSuffix
+        End If
+
         Dim ConfigurationPatched = False
         For Each Tag In Tags.Where(Function(x) x.Code = DefineBinaryDataTag)
             Dim Text = TryGetText(Tag.Data, 6)
             If Text IsNot Nothing AndAlso Text.Contains("connection.info.host.en=") AndAlso Text.Contains("live.environment.list=") Then
-                Tag.Data = Tag.Data.Take(6).Concat(Encoding.UTF8.GetBytes(PatchConfigurationText(Text, Config.GetConfigurationOverrides()))).ToArray()
+                Tag.Data = Tag.Data.Take(6).Concat(Encoding.UTF8.GetBytes(PatchConfigurationText(Text, ConfigValues))).ToArray()
                 ConfigurationPatched = True
             End If
         Next
@@ -402,6 +410,105 @@ Public Module HotelSwfPatcher
         Next
         Throw New Exception("RSA key table not found in HabboAir.swf")
     End Sub
+
+    ''' <summary>
+    ''' HabboCommunicationManager cuts the length of ".habbo.com" off connection.info.host and appends that obfuscated
+    ''' suffix when it opens the game socket, so it only connects to Habbo servers. The suffix is built from pushint arrays
+    ''' decoded by getKeyValue (char = 65290 - value + shift, shift counting down) and appended with "add".
+    ''' This turns that "add" into "pop" (both one byte) and returns the suffix, or "" when the client has no such check.
+    ''' A client that already has "pop" there (patched before, or downloaded pre-patched) still returns the suffix,
+    ''' because the client still cuts it off the host.
+    ''' </summary>
+    Private Function RemoveForcedHostSuffix(Tags As List(Of SwfTag)) As String
+        Const DoAbcTag As Integer = 82
+        For Each Tag In Tags.Where(Function(x) x.Code = DoAbcTag)
+            Dim AbcStart = Array.IndexOf(Tag.Data, CByte(0), 4) + 1 'flags (4 bytes) + name (null-terminated)
+            If AbcStart <= 0 Then Continue For
+            Dim Pool = ReadAbcIntPool(Tag.Data, AbcStart)
+            For Start = AbcStart To Tag.Data.Length - 1
+                If Tag.Data(Start) <> &H2D Then Continue For
+                Dim AddOffset As Integer
+                Dim Suffix = TryDecodeSuffixAppend(Tag.Data, Start, Pool, AddOffset)
+                If Suffix = ".habbo.com" Then
+                    Tag.Data(AddOffset) = &H29 'add -> pop
+                    Return Suffix
+                End If
+            Next
+        Next
+        Return ""
+    End Function
+
+    ''' <summary>Reads "(pushint+ newarray n)+ newarray g, pushbyte s, callproperty x 2, add (or pop)" and decodes the pushed values.</summary>
+    Private Function TryDecodeSuffixAppend(Data As Byte(), Start As Integer, Pool As List(Of Integer), ByRef AddOffset As Integer) As String
+        Try
+            Dim Offset = Start
+            Dim Groups As New List(Of List(Of Integer))
+            While Data(Offset) = &H2D
+                Dim Group As New List(Of Integer)
+                While Data(Offset) = &H2D
+                    Dim Index = ReadU30(Data, Offset + 1, Offset)
+                    If Index <= 0 OrElse Index >= Pool.Count Then Return ""
+                    Group.Add(Pool(CInt(Index)))
+                End While
+                If Data(Offset) <> &H56 OrElse ReadU30(Data, Offset + 1, Offset) <> Group.Count Then Return ""
+                Groups.Add(Group)
+            End While
+            If Groups.Count = 0 OrElse Data(Offset) <> &H56 OrElse ReadU30(Data, Offset + 1, Offset) <> Groups.Count Then Return ""
+            If Data(Offset) <> &H24 Then Return ""
+            Dim RawShift As Integer = Data(Offset + 1)
+            Dim Shift = If(RawShift > 127, RawShift - 256, RawShift) 'pushbyte is signed
+            Offset += 2
+            If Data(Offset) <> &H46 Then Return ""
+            ReadU30(Data, Offset + 1, Offset)
+            If ReadU30(Data, Offset, Offset) <> 2 OrElse (Data(Offset) <> &HA0 AndAlso Data(Offset) <> &H29) Then Return ""
+            Dim Text As New StringBuilder()
+            For Each Group In Groups
+                For Each Value In Group
+                    Dim Code = 65290 - Value + Shift
+                    If Code < 32 OrElse Code > 126 Then Return ""
+                    Text.Append(ChrW(Code))
+                    Shift -= 1
+                Next
+            Next
+            AddOffset = Offset
+            Return Text.ToString()
+        Catch
+            Return "" 'Not a valid instruction sequence at this offset
+        End Try
+    End Function
+
+    ''' <summary>The ABC integer constant pool. Index 0 is the implicit zero entry.</summary>
+    Private Function ReadAbcIntPool(Data As Byte(), AbcStart As Integer) As List(Of Integer)
+        Dim Offset = AbcStart + 4 'minor + major version
+        Dim Count = ReadU30(Data, Offset, Offset)
+        Dim Pool As New List(Of Integer) From {0}
+        For Index = 1 To CInt(Count) - 1
+            Dim Start = Offset
+            Dim Value = ReadU30(Data, Offset, Offset) And &HFFFFFFFFL
+            Dim Bits = 7 * (Offset - Start)
+            If Bits < 32 Then
+                If (Value And (1L << (Bits - 1))) <> 0 Then Value -= 1L << Bits 's32 is sign-extended from its encoded width
+            ElseIf Value > Integer.MaxValue Then
+                Value -= 1L << 32
+            End If
+            Pool.Add(CInt(Value))
+        Next
+        Return Pool
+    End Function
+
+    Private Function ReadU30(Data As Byte(), Offset As Integer, ByRef NextOffset As Integer) As Long
+        Dim Result As Long = 0
+        Dim Shift = 0
+        Do
+            Dim Value = Data(Offset)
+            Offset += 1
+            Result = Result Or (CLng(Value And &H7F) << Shift)
+            Shift += 7
+            If (Value And &H80) = 0 Then Exit Do
+        Loop While Shift < 35
+        NextOffset = Offset
+        Return Result
+    End Function
 
     Private Function TryReadStringTable(Data As Byte(), Keys As List(Of Byte())) As List(Of Byte())
         If Data.Length < 8 Then Return Nothing
